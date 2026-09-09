@@ -1,0 +1,27 @@
+[project]
+name = "imap-helper"
+version = "0.1.0"
+description = "Collection of imap helper functions"
+readme = "README.md"
+authors = [
+    { name = "Leo Werneck", email = "leo.werneck@princeton.edu" }
+]
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "colorama",
+]
+
+[project.scripts]
+imap = "imap_helper.imap:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "imap_helper"
+module-root = ""
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
