@@ -1,73 +1,39 @@
 """IMAP Helper Functions"""
 
 import argparse
-import subprocess
+from collections import defaultdict
 from pathlib import Path
 
-from imap_helper.constants import IMAP_BASE_DIR, IMAP_REPOS, PROGRESS_SYMBOLS
+from .constants import IMAP_BASE_DIR, IMAP_REPOS, SYMBOLS
+from .git import FetchUpdate, SyncResult, get_repo_name, sync_repo
 
 
-def git(
-    *args: str, cwd: str | Path, capture: bool = False, verbose: bool = False
-) -> bool:
-    if verbose:
-        print(f"Running: {' '.join(['git', *args])!r}")
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
+def _format_sync_result(repo_name: str, result: SyncResult) -> list[str]:
+    """Format one repository's synchronization result for the terminal."""
+    symbol = SYMBOLS["ok" if result.ok else "fail"]
+    if not result.ok:
+        detail = f" ({result.error})" if result.error else ""
+        return [f"  {symbol} {repo_name}{detail}"]
 
-    return result.returncode == 0
+    added = [update for update in result.fetch_updates if update.added]
+    pruned = [update for update in result.fetch_updates if update.pruned]
+    lines = [f"  {symbol} {repo_name}"]
+    by_remote: dict[str, list[FetchUpdate]] = defaultdict(list)
+    for update in [*added, *pruned]:
+        by_remote[update.remote or "other refs"].append(update)
 
+    for remote, updates in by_remote.items():
+        lines.append(f"      {remote}:")
+        for update in updates:
+            marker = SYMBOLS["add"] if update.added else SYMBOLS["prune"]
+            lines.append(f"        {marker} {update.branch}")
 
-def get_main_branch(repo_dir: str | Path, verbose: bool = False) -> str | None:
-    for name in ["main", "dev"]:
-        if git(
-            "show-ref",
-            "--verify",
-            "--quiet",
-            f"refs/remotes/upstream/{name}",
-            cwd=repo_dir,
-            verbose=verbose,
-        ):
-            return name
+    if result.main_updated and result.main_branch:
+        lines.append(f"      {SYMBOLS['sync']} {result.main_branch}")
+    if result.pushed and result.main_branch:
+        lines.append(f"      {SYMBOLS['push']} {result.main_branch}")
 
-    return None
-
-
-def get_repo_name(repo_dir: str | Path) -> str | None:
-    repo_url = subprocess.check_output(
-        ["git", "remote", "get-url", "origin"],
-        cwd=repo_dir,
-        text=True,
-    ).strip()
-    if repo_url.endswith(".git"):
-        return repo_url.split("/")[-1][:-4]
-
-    return repo_url.split("/")[-1]
-
-
-def sync_repo(repo_dir: Path, force: bool = False, verbose: bool = False) -> bool:
-    if not git("status", "--porcelain", cwd=repo_dir, verbose=verbose) and not force:
-        return False
-
-    if not git("fetch", "--all", cwd=repo_dir, verbose=verbose):
-        return False
-
-    main_branch = get_main_branch(repo_dir, verbose=verbose)
-    if main_branch is None:
-        return False
-
-    if not git("switch", main_branch, cwd=repo_dir, verbose=verbose):
-        return False
-
-    return git(
-        "merge", "--ff-only", f"upstream/{main_branch}", cwd=repo_dir, verbose=verbose
-    )
+    return lines
 
 
 def sync(args: argparse.Namespace) -> None:
@@ -88,13 +54,11 @@ def sync(args: argparse.Namespace) -> None:
     for repo in imap_repos:
         if args.verbose:
             print(f"Attempting to sync repo '{repo.name}' ({repo})")
-        if sync_repo(repo, force=args.force, verbose=args.verbose):
-            print(f"  {PROGRESS_SYMBOLS['ok']} {repo.name}")
-        else:
-            print(f"  {PROGRESS_SYMBOLS['fail']} {repo.name}")
+        result = sync_repo(repo, force=args.force, push=args.push, verbose=args.verbose)
+        print("\n".join(_format_sync_result(repo.name, result)))
 
 
-def add_bool_arg(p: argparse.ArgumentParser, n: str, h: str):
+def _add_bool_arg(p: argparse.ArgumentParser, n: str, h: str):
     p.add_argument(f"-{n[0]}", f"--{n}", action="store_true", help=h)
 
 
@@ -103,9 +67,10 @@ def main():
     subparsers = parser.add_subparsers(required=True)
 
     sync_parser = subparsers.add_parser("sync")
-    add_bool_arg(sync_parser, "all", "Sync all IMAP repositories")
-    add_bool_arg(sync_parser, "force", "Attempt sync even if repo not clean")
-    add_bool_arg(sync_parser, "verbose", "Verbose output")
+    _add_bool_arg(sync_parser, "all", "Sync all IMAP repositories")
+    _add_bool_arg(sync_parser, "force", "Attempt sync even if repo not clean")
+    _add_bool_arg(sync_parser, "push", "Push changes to origin after syncing")
+    _add_bool_arg(sync_parser, "verbose", "Verbose output")
     sync_parser.set_defaults(func=sync)
 
     args = parser.parse_args()
