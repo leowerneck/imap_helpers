@@ -26,4 +26,5 @@ IMAP_REPOS = [
     "imap_L3_processing",
     "imap-data-access",
     "sds-data-manager",
+    "swapi-tools",
 ]

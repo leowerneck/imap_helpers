@@ -105,13 +105,14 @@ def get_main_branch(repo_dir: str | Path, verbose: bool = False) -> str | None:
 
 
 def get_repo_name(repo_dir: str | Path) -> str | None:
-    """Get the name of the git repository for the `repo_dir` path."""
-    result = git("remote", "get-url", "origin", cwd=repo_dir)
-    if result.returncode != 0:
-        return None
+    """Get the preferred remote repository name for `repo_dir`."""
+    for remote in ("upstream", "origin"):
+        result = git("remote", "get-url", remote, cwd=repo_dir)
+        if result.returncode == 0:
+            repo_url = result.stdout.strip().removesuffix(".git")
+            return repo_url.rsplit("/", maxsplit=1)[-1]
 
-    repo_url = result.stdout.strip().removesuffix(".git")
-    return repo_url.rsplit("/", maxsplit=1)[-1]
+    return None
 
 
 def _failure(
